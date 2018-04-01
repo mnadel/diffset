@@ -5,7 +5,6 @@ import (
 	"crypto/md5"
 	"encoding/hex"
 	"flag"
-	"fmt"
 	"log"
 	"os"
 	"strings"
@@ -17,6 +16,8 @@ var (
 	intersect   = flag.Bool("intersect", false, "Only show intersections")
 )
 
+type visitor func(string)
+
 func main() {
 	flag.Parse()
 
@@ -25,35 +26,20 @@ func main() {
 		*newFilename = flag.Arg(1)
 	}
 
-    if *oldFilename == "" || *newFilename == "" {
-        flag.PrintDefaults()
-        os.Exit(1)
-    }
-
-	oldFile, err := os.Open(*oldFilename)
-	if err != nil {
-		log.Fatal(err)
+	if *oldFilename == "" || *newFilename == "" {
+		flag.PrintDefaults()
+		os.Exit(1)
 	}
-	defer oldFile.Close()
-
-	newFile, err := os.Open(*newFilename)
-	if err != nil {
-		log.Fatal(err)
-	}
-	defer newFile.Close()
 
 	if *intersect {
-		diffIntersect()
+		diffIntersect(*oldFilename, *newFilename)
 	} else {
-		diff()
+		diff(*oldFilename, *newFilename)
 	}
 }
 
-func diffIntersect() {
-	oldLines := readHashes(*oldFilename)
-	foundInNew := make(map[string]bool)
-
-	f, err := os.Open(*newFilename)
+func scanLines(filename string, visit visitor) {
+	f, err := os.Open(filename)
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -61,78 +47,33 @@ func diffIntersect() {
 
 	scanner := bufio.NewScanner(f)
 	for scanner.Scan() {
-		text := strings.Trim(scanner.Text(), " \r\n")
-
-		h := hash(text)
-
-		if _, ok := oldLines[hash(text)]; ok {
-			// only print common elements once
-			if _, alreadySeen := foundInNew[h]; !alreadySeen {
-				foundInNew[h] = true
-				fmt.Println(text)
-			}
-		}
+		text := trim(scanner.Text())
+		visit(text)
 	}
 }
 
-func diff() {
-	oldLines := readFile(*oldFilename)
-	newLines := readFile(*newFilename)
+func readHashes(filename string) map[string]bool {
+	m := make(map[string]bool)
 
-	numOldLines := int64(0)
-	numNewLines := int64(0)
+	scanLines(filename, func(line string) {
+		m[hash(line)] = true
+	})
 
-	for k := range oldLines {
-		numOldLines++
-
-		if _, ok := newLines[k]; !ok {
-			fmt.Println("-", k)
-		}
-	}
-
-	for k := range newLines {
-		numNewLines++
-
-		if _, ok := oldLines[k]; !ok {
-			fmt.Println("+", k)
-		}
-	}
+	return m
 }
 
 func readFile(filename string) map[string]bool {
-	f, err := os.Open(filename)
-	if err != nil {
-		log.Fatal(err)
-	}
-	defer f.Close()
-
 	m := make(map[string]bool)
 
-	scanner := bufio.NewScanner(f)
-	for scanner.Scan() {
-		key := strings.Trim(scanner.Text(), " \r\n")
-		m[key] = true
-	}
+	scanLines(filename, func(line string) {
+		m[line] = true
+	})
 
 	return m
 }
 
-func readHashes(filename string) map[interface{}]bool {
-	f, err := os.Open(filename)
-	if err != nil {
-		log.Fatal(err)
-	}
-	defer f.Close()
-
-	m := make(map[interface{}]bool)
-
-	scanner := bufio.NewScanner(f)
-	for scanner.Scan() {
-		key := strings.Trim(scanner.Text(), " \r\n")
-		m[hash(key)] = true
-	}
-
-	return m
+func trim(text string) string {
+	return strings.Trim(text, " \r\n")
 }
 
 func hash(text string) string {
